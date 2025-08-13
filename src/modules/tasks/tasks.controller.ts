@@ -22,18 +22,17 @@ import {
 } from '@nestjs/swagger';
 
 import { Task } from './entities/task.entity';
-import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
-import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetTasksQueryDto } from './dto/get-tasks-query.dto';
 import { TaskStatsDto } from './dto/task-stats.dto';
 import { ParseUUIDPipe } from '@nestjs/common';
 import { BatchProcessDto, BatchProcessResult } from './dto/batch-process.dto';
+import { ThrottlerGuard, Throttle, seconds } from '@nestjs/throttler';
 
 @ApiTags('tasks')
 @Controller('tasks')
-@UseGuards(JwtAuthGuard, RateLimitGuard)
-@RateLimit({ limit: 100, windowMs: 60000 })
+@UseGuards(JwtAuthGuard, ThrottlerGuard)
+@Throttle({ default: { limit: 10, ttl: seconds(60) } })
 @ApiBearerAuth()
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
@@ -63,7 +62,6 @@ export class TasksController {
     return this.tasksService.findOneOrFail(id);
   }
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update a task' })
   @ApiOkResponse({ type: Task })
   @ApiNotFoundResponse({ description: 'Task not found' })

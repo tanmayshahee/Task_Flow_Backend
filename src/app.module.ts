@@ -2,84 +2,94 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { APP_GUARD } from '@nestjs/core';
+
 import { UsersModule } from './modules/users/users.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TaskProcessorModule } from './queues/task-processor/task-processor.module';
 import { ScheduledTasksModule } from './queues/scheduled-tasks/scheduled-tasks.module';
+
 import { CacheService } from './common/services/cache.service';
+
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import Redis from 'ioredis';
+import { HealthModule } from '@modules/health/health.module';
 
 @Module({
   imports: [
-    // Configuration
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
-    
-    // Database
+    // 1) Config
+    ConfigModule.forRoot({ isGlobal: true }),
+
+    // 2) Database (parse numbers; keep sync only in dev)
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (cfg: ConfigService) => ({
         type: 'postgres',
-        host: configService.get('DB_HOST'),
-        port: configService.get('DB_PORT'),
-        username: configService.get('DB_USERNAME'),
-        password: configService.get('DB_PASSWORD'),
-        database: configService.get('DB_DATABASE'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: configService.get('NODE_ENV') === 'development',
-        logging: configService.get('NODE_ENV') === 'development',
+        host: cfg.get<string>('DB_HOST', '127.0.0.1'),
+        port: parseInt(cfg.get<string>('DB_PORT', '5432'), 10),
+        username: cfg.get<string>('DB_USERNAME', 'postgres'),
+        password: cfg.get<string>('DB_PASSWORD', 'postgres'),
+        database: cfg.get<string>('DB_DATABASE', 'taskflow'),
+        // autoLoadEntities helps avoid entity glob issues during TS/JS builds:
+        autoLoadEntities: true,
+        synchronize: cfg.get<string>('NODE_ENV') === 'development',
+        logging: cfg.get<string>('NODE_ENV') === 'development',
       }),
     }),
-    
-    // Scheduling
+
+    // 3) Scheduler
     ScheduleModule.forRoot(),
-    
-    // Queue
+
+    // 4) BullMQ (Redis connection parsed as numbers)
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (cfg: ConfigService) => ({
         connection: {
-          host: configService.get('REDIS_HOST'),
-          port: configService.get('REDIS_PORT'),
+          host: cfg.get<string>('REDIS_HOST', '127.0.0.1'),
+          port: parseInt(cfg.get<string>('REDIS_PORT', '6379'), 10),
         },
       }),
     }),
-    
-    // Rate limiting
+
+    // 5) Throttling (global) with Redis storage
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ([
-        {
-          ttl: 60,
-          limit: 10,
-        },
-      ]),
+      useFactory: (cfg: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: cfg.get<number>('THROTTLE_TTL') ?? 60, // seconds
+            limit: cfg.get<number>('THROTTLE_LIMIT') ?? 10,
+          },
+        ],
+        storage: new ThrottlerStorageRedisService(
+          new Redis({
+            host: cfg.get<string>('REDIS_HOST', '127.0.0.1'),
+            port: parseInt(cfg.get<string>('REDIS_PORT', '6379'), 10),
+          }),
+        ),
+      }),
     }),
-    
-    // Feature modules
+
+    // 6) Feature modules
     UsersModule,
     TasksModule,
     AuthModule,
-    
-    // Queue processing modules
     TaskProcessorModule,
     ScheduledTasksModule,
+    HealthModule,
   ],
   providers: [
-    // Inefficient: Global cache service with no configuration options
-    // This creates a single in-memory cache instance shared across all modules
-    CacheService
+    CacheService,
+
+    // Enable Throttler globally via DI (don’t instantiate manually in main.ts)
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
-  exports: [
-    // Exporting the cache service makes it available to other modules
-    // but creates tight coupling
-    CacheService
-  ]
+  exports: [CacheService],
 })
-export class AppModule {} 
+export class AppModule {}
