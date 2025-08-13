@@ -17,6 +17,7 @@ import { CacheService } from './common/services/cache.service';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import Redis from 'ioredis';
 import { HealthModule } from '@modules/health/health.module';
+import { MetricsModule } from '@common/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { HealthModule } from '@modules/health/health.module';
     TaskProcessorModule,
     ScheduledTasksModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: [
     CacheService,

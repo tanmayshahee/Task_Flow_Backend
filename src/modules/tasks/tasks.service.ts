@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere, DataSource, DeleteResult, In } from 'typeorm';
+import { Repository, FindOptionsWhere, DataSource, DeleteResult, In, LessThan } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -189,6 +189,34 @@ export class TasksService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  async findOverdueTasks(limit: number, offset: number): Promise<Task[]> {
+    const now = new Date();
+
+    return this.tasksRepository.find({
+      where: {
+        dueDate: LessThan(now),
+        status: TaskStatus.PENDING,
+      },
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  async notifyUser(userId: string, taskId: string): Promise<void> {
+    // Example: Fetch user email from User entity (if needed)
+    // const user = await this.userRepository.findOne({ where: { id: userId } });
+
+    // TODO: Replace this with actual notification logic (email, push, etc.)
+    this.logger.log(`Notifying user ${userId} about overdue task ${taskId}`);
+
+    // Example: Email service integration
+    // await this.emailService.send({
+    //   to: user.email,
+    //   subject: 'Overdue Task Reminder',
+    //   body: `Your task with ID ${taskId} is overdue. Please take action.`,
+    // });
   }
 
   async updateStatus(id: string, status: string): Promise<Task> {
